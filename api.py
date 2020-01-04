@@ -1,3 +1,4 @@
+# -*- encoding: utf-8 -*-
 from flask import Flask
 from flask_restful import Api, Resource, reqparse
 import random
@@ -113,7 +114,7 @@ class Quote(Resource):
       params = parser.parse_args()
       for quote in ai_quotes:
           if(id == quote["id"]):
-              return f"Quote with id {id} already exists", 400
+              return "Quote with id" + id + "already exists", 400
       quote = {
           "id": int(id),
           "author": params["author"],
@@ -143,7 +144,7 @@ class Quote(Resource):
     def delete(self, id):
       global ai_quotes
       ai_quotes = [qoute for qoute in ai_quotes if qoute["id"] != id]
-      return f"Quote with id {id} is deleted.", 200
+      return "Quote with id" + id + "is deleted.", 200
 
 api.add_resource(Quote, "/ai-quotes", "/ai-quotes/", "/ai-quotes/<int:id>")
 if __name__ == '__main__':
