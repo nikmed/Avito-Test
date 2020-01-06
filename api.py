@@ -43,9 +43,17 @@ class dbWorker:
         finally:
             self.connection.commit()
 
-    def get_advert_list(self):
-        self.cursor.execute("SELECT * FROM Advert")
-        return self.cursor.fetchall()
+    def get_advert_list(self, order = None, up = None):
+        if order == None:
+            self.cursor.execute("SELECT * FROM Advert")
+            return self.cursor.fetchall()
+        else:
+            if up == False:
+                self.cursor.execute(f"SELECT * FROM Advert ORDER BY {order} DESC")
+                return self.cursor.fetchall()
+            else:
+                self.cursor.execute(f"SELECT * FROM Advert ORDER BY {order}")
+                return self.cursor.fetchall()
 
     def get_advert_by_id(self, id):
         self.cursor.execute(f"SELECT * FROM Advert WHERE id = {id};")
@@ -62,9 +70,12 @@ db.create_table()
 def index():
     return "Api"
 
-@app.route('/adverts', methods=['GET'])
-def get_adverts():
-    return jsonify({'adverts': db.get_advert_list()})
+@app.route('/adverts/<string:sort>/<int:up>', methods=['GET'])
+def get_adverts(sort,up):
+    if sort != None and up != None:
+        return jsonify({'adverts': db.get_advert_list(sort,up)})
+    else:
+        return jsonify({'adverts': db.get_advert_list()})
 
 
 @app.route('/advert/<int:advert_id>', methods=['GET'])
