@@ -30,12 +30,13 @@ class dbWorker:
         name TEXT,
         description TEXT,
         photolinks TEXT,
-        price INT)''')
+        price INT,
+        data TIMESTAMP)''')
         self.connection.commit()
 
     def create_record(self, name, desc, links, price):
         try:
-            self.cursor.execute(f"INSERT INTO Advert (name, description, photolinks, price) VALUES ('{name}', '{desc}', '{links}', {price}) RETURNING id;")
+            self.cursor.execute(f"INSERT INTO Advert (name, description, photolinks, price, data) VALUES ('{name}', '{desc}', '{links}', {price}, now()) RETURNING id;")
             return cursor.fetchone(), 1
         except Exception as ex:
             return ex, 0
@@ -47,7 +48,7 @@ class dbWorker:
         return self.cursor.fetchall()
 
     def get_advert_by_id(self, id):
-        self.cursor.execute(f"SELECT * FROM Advert WHERE id = {id}")
+        self.cursor.execute(f"SELECT * FROM Advert WHERE id = {id};")
         return self.cursor.fetchone()
 
 
@@ -68,10 +69,10 @@ def get_adverts():
 
 @app.route('/advert/<int:advert_id>', methods=['GET'])
 def get_advert(advert_id):
-    task = filter(lambda t: t['id'] == advert_id, adverts)
-    if len(advert) == 0:
-        abort(404)
-    return jsonify({'advert': db.get_advert_by_id(id)})
+    query = db.get_advert_by_id(advert_id)
+    if query == None:
+        abort(404);
+    return jsonify({"adverts" : query})
 
 
 @app.route('/adverts', methods=['POST'])
