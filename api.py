@@ -1,6 +1,9 @@
 # -*- encoding: utf-8 -*-
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request, abort, make_response
+from flask_httpauth import HTTPBasicAuth
 import psycopg2
+
+auth = HTTPBasicAuth()
 
 
 class dbWorker:
@@ -24,39 +27,52 @@ class dbWorker:
       self.connection.commit()
       self.connection.close()
 
-    def create_table(self):
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS Advert
+    def create_table(self, tablename):
+        self.tablename = tablename
+        self.cursor.execute(f'''CREATE TABLE IF NOT EXISTS {self.tablename}
         (id SERIAL NOT NULL,
         name TEXT,
         description TEXT,
-        photolinks TEXT,
+        primarylink TEXT,
+        additionallinks TEXT,
         price INT,
         data TIMESTAMP)''')
         self.connection.commit()
 
     def create_record(self, name, desc, links, price):
+        splitedlinks = links.split(',')
+        primarylink = splitedlinks[0]
+        splitedlinks.remove(splitedlinks[0])
+        additionallinks = splitedlinks
         try:
-            self.cursor.execute(f"INSERT INTO Advert (name, description, photolinks, price, data) VALUES ('{name}', '{desc}', '{links}', {price}, now()) RETURNING id;")
-            return cursor.fetchone(), 1
+            self.cursor.execute(f"INSERT INTO {self.tablename} (name, description, primarylink, additionallinks, price, data) VALUES ('{name}', '{desc}', '{primarylink}', '{','.join(additionallinks)}', '{price}', now()) RETURNING id;")
+            return self.cursor.fetchone()[0], "Success"
         except Exception as ex:
-            return ex, 0
+            return str(ex), "Error"
         finally:
             self.connection.commit()
 
     def get_advert_list(self, order = None, up = None):
-        if order == None:
-            self.cursor.execute("SELECT * FROM Advert")
+        if order == None and up == None:
+            self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename}")
             return self.cursor.fetchall()
         else:
             if up == False:
-                self.cursor.execute(f"SELECT * FROM Advert ORDER BY {order} DESC")
+                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order} DESC")
                 return self.cursor.fetchall()
             else:
-                self.cursor.execute(f"SELECT * FROM Advert ORDER BY {order}")
+                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order}")
                 return self.cursor.fetchall()
 
-    def get_advert_by_id(self, id):
-        self.cursor.execute(f"SELECT * FROM Advert WHERE id = {id};")
+    def get_advert_by_id(self, id, desc = 0, addlinks = 0):
+        if desc == True and addlinks == True:
+            self.cursor.execute(f"SELECT name, price, primarylink, description, additionallinks FROM {self.tablename} WHERE id = {id};")
+        elif desc == False and addlinks == False:
+            self.cursor.execute(f"SELECT name, price, primarylink FROM {self.tablename} WHERE id = {id};")
+        elif desc == True:
+            self.cursor.execute(f"SELECT name, price, primarylink, description FROM {self.tablename} WHERE id = {id};")
+        else:
+            self.cursor.execute(f"SELECT name, price, primarylink, additionallinks FROM {self.tablename} WHERE id = {id};")
         return self.cursor.fetchone()
 
 
@@ -64,39 +80,50 @@ class dbWorker:
 app = Flask(__name__)
 db = dbWorker("postgres","admin","127.0.0.1","5432")
 db.open_connection()
-db.create_table()
+db.create_table("advert")
 
 @app.route('/')
 def index():
     return "Api"
 
-@app.route('/adverts/<string:sort>/<int:up>', methods=['GET'])
-def get_adverts(sort,up):
-    if sort != None and up != None:
-        return jsonify({'adverts': db.get_advert_list(sort,up)})
-    else:
-        return jsonify({'adverts': db.get_advert_list()})
+@app.route('/adverts/', defaults = {'page' : 0}, methods=['GET'])
+@app.route('/adverts/<int:page>', methods=['GET'])
+@app.route('/adverts/<string:sort>/<int:up>', defaults = {'page' : 0}, methods=['GET'])
+@app.route('/adverts/<string:sort>/<int:up>/page=<int:page>', methods=['GET'])
+@auth.login_required
+def get_adverts(page, up = None, sort = None):
+    return jsonify({'adverts': db.get_advert_list(sort,up)})
 
 
-@app.route('/advert/<int:advert_id>', methods=['GET'])
-def get_advert(advert_id):
-    query = db.get_advert_by_id(advert_id)
+@app.route('/advert/<int:advert_id>/<int:desc>/<int:addlinks>', methods=['GET'])
+@auth.login_required
+def get_advert(advert_id, desc = False, addlinks = False):
+    query = db.get_advert_by_id(advert_id, desc, addlinks)
     if query == None:
         abort(404);
     return jsonify({"adverts" : query})
 
 
-@app.route('/adverts', methods=['POST'])
+@app.route('/add_advert', methods=['POST'])
+@auth.login_required
 def create_advert():
-    advert = {
-        'name': request.json['name'],
-        'description': request.json['description'],
-        'links': request.json['links'],
-        'price': request.json['price']
-    }
-    db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
-    return jsonify({'advert': advert})
+    id, result = db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
+    return jsonify({"id" : id,
+                    "result" : result})
 
+@app.errorhandler(404)
+def not_found(error):
+    return make_response(jsonify({'error': 'Not found'}), 404)
+
+@auth.get_password
+def get_password(username):
+    if username == 'python':
+        return 'python'
+    return None
+
+@auth.error_handler
+def unauthorized():
+    return make_response(jsonify({'error': 'Unauthorized access'}), 403)
 
 if __name__ == '__main__':
     app.run(debug=True)
