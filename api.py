@@ -1,6 +1,7 @@
 # -*- encoding: utf-8 -*-
 from flask import Flask, jsonify, request, abort, make_response
 from flask_httpauth import HTTPBasicAuth
+from flask_paginate import Pagination, get_page_parameter
 import psycopg2
 
 auth = HTTPBasicAuth()
@@ -34,6 +35,7 @@ class dbWorker:
 
     # Метод создания таблицы с заданными полями
     def create_table(self, tablename):
+        db.open_connection()
         self.tablename = tablename
         self.cursor.execute(f'''CREATE TABLE IF NOT EXISTS {self.tablename}
         (id SERIAL NOT NULL,
@@ -44,9 +46,11 @@ class dbWorker:
         price INT,
         data TIMESTAMP);''')
         self.connection.commit()
+        db.close_connection()
 
     # Метод добавления записи в таблицу
     def create_record(self, name, desc, links, price):
+        db.open_connection()
         splitedlinks = links.split(',')
         primarylink = splitedlinks[0]
         splitedlinks.remove(splitedlinks[0])
@@ -58,31 +62,53 @@ class dbWorker:
             return str(ex), "Error"
         finally:
             self.connection.commit()
+        db.close_connection()
 
     # Метод для получения списка всех объявлений из базы данных
-    def get_advert_list(self, order = None, up = None):
-        if order == None and up == None:
-            self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename}")
-            return self.cursor.fetchall()
+    def get_advert_list(self, start = 0, order = "", up = ""):
+        db.open_connection()
+        if order == "" and up == "":
+            self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} LIMIT {10} OFFSET {start}")
+            queryres = self.cursor.fetchall()
         else:
-            if up == False:
-                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order} DESC")
-                return self.cursor.fetchall()
+            if up == "down":
+                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order} DESC  LIMIT {10} OFFSET {start}")
+                queryres = self.cursor.fetchall()
             else:
-                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order}")
-                return self.cursor.fetchall()
+                self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order}  LIMIT {10} OFFSET {start}")
+                queryres = self.cursor.fetchall()
+        result = []
+        for line in queryres:
+            record = {"title" : line[0],
+                    "link" :  line[1],
+                    "price" : line[2]
+                    }
+            result.append(record)
+        db.close_connection()
+        return result
 
     # Метод для получения записи по переданному id из базы данных
-    def get_advert_by_id(self, id, desc = 0, addlinks = 0):
-        if desc == True and addlinks == True:
-            self.cursor.execute(f"SELECT name, price, primarylink, description, additionallinks FROM {self.tablename} WHERE id = {id};")
-        elif desc == False and addlinks == False:
-            self.cursor.execute(f"SELECT name, price, primarylink FROM {self.tablename} WHERE id = {id};")
-        elif desc == True:
-            self.cursor.execute(f"SELECT name, price, primarylink, description FROM {self.tablename} WHERE id = {id};")
+    def get_advert_by_id(self, id, fields):
+        db.open_connection()
+        s = ""
+        if fields != "":
+            s = fields.split(',')
+            sep = ","
         else:
-            self.cursor.execute(f"SELECT name, price, primarylink, additionallinks FROM {self.tablename} WHERE id = {id};")
-        return self.cursor.fetchone()
+            sep = ""
+        self.cursor.execute(f"SELECT name, primarylink, price {sep} {fields} FROM {self.tablename} WHERE id = {id};")
+        record = list(self.cursor.fetchone())
+        record.reverse()
+        result = {"title" : record.pop(),
+                  "link" :  record.pop(),
+                  "price" : record.pop()
+        }
+        if len(s) > 0:
+            result[s.pop()] = record.pop()
+            if len(s) > 0:
+                result[s.pop()] = record.pop()
+        db.close_connection()
+        return result
 
 
 app = Flask(__name__)
@@ -92,28 +118,35 @@ app = Flask(__name__)
 # host = "127.0.0.1"
 # port = "5432"
 db = dbWorker("postgres", "admin", "127.0.0.1", "5432")
-db.open_connection()
 db.create_table("advert")
 
 
 # Метод получения списка объявлений с возможностью сортировки по возрастанию и убыванию по любому из полей таблицы
-@app.route('/adverts/', defaults = {'page' : 0}, methods=['GET'])
-@app.route('/adverts/<int:page>', methods=['GET'])
-@app.route('/adverts/<string:sort>/<int:up>', defaults = {'page' : 0}, methods=['GET'])
-@app.route('/adverts/<string:sort>/<int:up>/page=<int:page>', methods=['GET'])
+@app.route('/adverts', methods=['GET'])
+@app.route('/adverts/page=<int:page>', methods=['GET'])
+@app.route('/adverts/<string:sort>/<string:up>', methods=['GET'])
+@app.route('/adverts/page=<int:page>/<string:sort>/<string:up>', methods=['GET'])
 @auth.login_required
-def get_adverts(page, up = None, sort = None):
-    return jsonify({'adverts': db.get_advert_list(sort,up)})
+def get_adverts(page = 1, up = "", sort = ""):
+    next_page_url = {}
+    if len(db.get_advert_list((page)*10)) > 0:
+            if sort != "":
+                if up != "":
+                    next_page_url = {"next_page" : f'/adverts/page={page + 1}/{sort}/{up}'}
+            else:
+                next_page_url = {"next_page" : f'/adverts/page={page + 1}'}
+    a = {'adverts': db.get_advert_list((page - 1)*10 , sort, up)}
+    a.update(next_page_url)
+    return a#jsonify({'adverts': db.get_advert_list((page - 1)*10 , sort, up)})
 
 
 # Метод получения конкретного объявления по id, с возможностью получить опциональные поля
 @app.route('/advert/<int:advert_id>', methods=['GET'])
-@app.route('/advert/<int:advert_id>/<int:desc>', methods=['GET'])
-@app.route('/advert/<int:advert_id>/<int:addlinks>', methods=['GET'])
-@app.route('/advert/<int:advert_id>/<int:desc>/<int:addlinks>', methods=['GET'])
+@app.route('/advert/<int:advert_id>/fields=<string:fields>', methods=['GET'])
 @auth.login_required
-def get_advert(advert_id, desc = False, addlinks = False):
-    query = db.get_advert_by_id(advert_id, desc, addlinks)
+def get_advert(advert_id, fields = ""):
+
+    query = db.get_advert_by_id(advert_id, fields)
     if query == None:
         abort(404);
     return jsonify({"adverts" : query})
@@ -123,7 +156,9 @@ def get_advert(advert_id, desc = False, addlinks = False):
 @app.route('/add_advert', methods=['POST'])
 @auth.login_required
 def create_advert():
-    if (len(request.json['name']) <= 200 and len(request.json['links'].split(',')) <=3 and len(request.json['description']) <= 1000):
+    if not request.json :
+        return
+    elif (len(request.json['name']) <= 200 and len(request.json['links'].split(',')) <=3 and len(request.json['description']) <= 1000):
         id, result = db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
         return jsonify({"id" : id,
                     "result" : result})
