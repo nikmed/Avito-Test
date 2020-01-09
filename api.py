@@ -6,13 +6,17 @@ import psycopg2
 auth = HTTPBasicAuth()
 
 
+# Класс для работы с базой данных PostgresSQL
 class dbWorker:
+
+    # Конструктор
     def __init__(self, user, password, host, port):
         self.user = user
         self.password = password
         self.host = host
         self.port = port
 
+    # Метод открытия соединения с базой данных
     def open_connection(self):
         self.connection = psycopg2.connect(
           database="postgres",
@@ -23,10 +27,12 @@ class dbWorker:
         )
         self.cursor = self.connection.cursor()
 
+    # Метод закрывающий соединение с базой данных
     def close_connection(self):
       self.connection.commit()
       self.connection.close()
 
+    # Метод создания таблицы с заданными полями
     def create_table(self, tablename):
         self.tablename = tablename
         self.cursor.execute(f'''CREATE TABLE IF NOT EXISTS {self.tablename}
@@ -36,9 +42,10 @@ class dbWorker:
         primarylink TEXT,
         additionallinks TEXT,
         price INT,
-        data TIMESTAMP)''')
+        data TIMESTAMP);''')
         self.connection.commit()
 
+    # Метод добавления записи в таблицу
     def create_record(self, name, desc, links, price):
         splitedlinks = links.split(',')
         primarylink = splitedlinks[0]
@@ -52,6 +59,7 @@ class dbWorker:
         finally:
             self.connection.commit()
 
+    # Метод для получения списка всех объявлений из базы данных
     def get_advert_list(self, order = None, up = None):
         if order == None and up == None:
             self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename}")
@@ -64,6 +72,7 @@ class dbWorker:
                 self.cursor.execute(f"SELECT name, primarylink, price FROM {self.tablename} ORDER BY {order}")
                 return self.cursor.fetchall()
 
+    # Метод для получения записи по переданному id из базы данных
     def get_advert_by_id(self, id, desc = 0, addlinks = 0):
         if desc == True and addlinks == True:
             self.cursor.execute(f"SELECT name, price, primarylink, description, additionallinks FROM {self.tablename} WHERE id = {id};")
@@ -76,16 +85,18 @@ class dbWorker:
         return self.cursor.fetchone()
 
 
-
 app = Flask(__name__)
-db = dbWorker("postgres","admin","127.0.0.1","5432")
+# Инициализируем экземпляр db класса dbWorker со следующими параметрами
+# login = "postgres"
+# password = "admin"
+# host = "127.0.0.1"
+# port = "5432"
+db = dbWorker("postgres", "admin", "127.0.0.1", "5432")
 db.open_connection()
 db.create_table("advert")
 
-@app.route('/')
-def index():
-    return "Api"
 
+# Метод получения списка объявлений с возможностью сортировки по возрастанию и убыванию по любому из полей таблицы
 @app.route('/adverts/', defaults = {'page' : 0}, methods=['GET'])
 @app.route('/adverts/<int:page>', methods=['GET'])
 @app.route('/adverts/<string:sort>/<int:up>', defaults = {'page' : 0}, methods=['GET'])
@@ -95,6 +106,10 @@ def get_adverts(page, up = None, sort = None):
     return jsonify({'adverts': db.get_advert_list(sort,up)})
 
 
+# Метод получения конкретного объявления по id, с возможностью получить опциональные поля
+@app.route('/advert/<int:advert_id>', methods=['GET'])
+@app.route('/advert/<int:advert_id>/<int:desc>', methods=['GET'])
+@app.route('/advert/<int:advert_id>/<int:addlinks>', methods=['GET'])
 @app.route('/advert/<int:advert_id>/<int:desc>/<int:addlinks>', methods=['GET'])
 @auth.login_required
 def get_advert(advert_id, desc = False, addlinks = False):
@@ -104,26 +119,41 @@ def get_advert(advert_id, desc = False, addlinks = False):
     return jsonify({"adverts" : query})
 
 
+# Метод создания объявления
 @app.route('/add_advert', methods=['POST'])
 @auth.login_required
 def create_advert():
-    id, result = db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
-    return jsonify({"id" : id,
+    if (len(request.json['name']) <= 200 and len(request.json['links'].split(',')) <=3 and len(request.json['description']) <= 1000):
+        id, result = db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
+        return jsonify({"id" : id,
                     "result" : result})
+    else:
+        return jsonify({"result" : "Error",
+                        "Length(name) <= 200" :  len(request.json['name']) <= 200,
+                        "Count(links) <= 3" :  len(request.json['links']) <= 3,
+                        "Length(description) <= 1000" :  len(request.json['description']) <= 1000
+                         })
 
+
+# Метод обработки ошибки 404
 @app.errorhandler(404)
 def not_found(error):
     return make_response(jsonify({'error': 'Not found'}), 404)
 
+
+# Метод аунтефикации пользователя python с паролем python
 @auth.get_password
 def get_password(username):
     if username == 'python':
         return 'python'
     return None
 
+
+# Метод обработки ошибки аунтефикации
 @auth.error_handler
 def unauthorized():
     return make_response(jsonify({'error': 'Unauthorized access'}), 403)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
