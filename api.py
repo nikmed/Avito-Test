@@ -1,5 +1,5 @@
 # -*- encoding: utf-8 -*-
-from flask import Flask, jsonify, request, abort, make_response
+from flask import Flask, jsonify, request, abort, make_response, url_for
 from flask_httpauth import HTTPBasicAuth
 from flask_paginate import Pagination, get_page_parameter
 import psycopg2
@@ -79,10 +79,10 @@ class dbWorker:
                 queryres = self.cursor.fetchall()
         result = []
         for line in queryres:
-            record = {"title" : line[0],
-                    "link" :  line[1],
-                    "price" : line[2]
-                    }
+            record = {"title": line[0],
+                      "link": line[1],
+                      "price": line[2]
+                      }
             result.append(record)
         db.close_connection()
         return result
@@ -99,10 +99,10 @@ class dbWorker:
         self.cursor.execute(f"SELECT name, primarylink, price {sep} {fields} FROM {self.tablename} WHERE id = {id};")
         record = list(self.cursor.fetchone())
         record.reverse()
-        result = {"title" : record.pop(),
-                  "link" :  record.pop(),
-                  "price" : record.pop()
-        }
+        result = {"title": record.pop(),
+                  "link":  record.pop(),
+                  "price": record.pop()
+                  }
         if len(s) > 0:
             result[s.pop()] = record.pop()
             if len(s) > 0:
@@ -132,12 +132,12 @@ def get_adverts(page = 1, up = "", sort = ""):
     if len(db.get_advert_list((page)*10)) > 0:
             if sort != "":
                 if up != "":
-                    next_page_url = {"next_page" : f'/adverts/page={page + 1}/{sort}/{up}'}
+                    next_page_url = {"next_page": f'/adverts/page={page + 1}/{sort}/{up}'}
             else:
-                next_page_url = {"next_page" : f'/adverts/page={page + 1}'}
-    a = {'adverts': db.get_advert_list((page - 1)*10 , sort, up)}
+                next_page_url = {"next_page": f'/adverts/page={page + 1}'}
+    a = {'adverts': db.get_advert_list((page - 1)*10, sort, up)}
     a.update(next_page_url)
-    return a#jsonify({'adverts': db.get_advert_list((page - 1)*10 , sort, up)})
+    return jsonify(a), 200
 
 
 # Метод получения конкретного объявления по id, с возможностью получить опциональные поля
@@ -145,29 +145,28 @@ def get_adverts(page = 1, up = "", sort = ""):
 @app.route('/advert/<int:advert_id>/fields=<string:fields>', methods=['GET'])
 @auth.login_required
 def get_advert(advert_id, fields = ""):
-
     query = db.get_advert_by_id(advert_id, fields)
     if query == None:
-        abort(404);
-    return jsonify({"adverts" : query})
+        abort(404)
+    return jsonify({"adverts": query}), 200
 
 
 # Метод создания объявления
 @app.route('/add_advert', methods=['POST'])
 @auth.login_required
 def create_advert():
-    if not request.json :
-        return
+    if not request.json:
+        abort(404)
     elif (len(request.json['name']) <= 200 and len(request.json['links'].split(',')) <=3 and len(request.json['description']) <= 1000):
         id, result = db.create_record(request.json['name'], request.json['description'], request.json['links'], request.json['price'])
-        return jsonify({"id" : id,
-                    "result" : result})
+        return jsonify({"id": id,
+                        "result": result}), 201
     else:
-        return jsonify({"result" : "Error",
-                        "Length(name) <= 200" :  len(request.json['name']) <= 200,
-                        "Count(links) <= 3" :  len(request.json['links']) <= 3,
-                        "Length(description) <= 1000" :  len(request.json['description']) <= 1000
-                         })
+        return jsonify({"result": "Error",
+                        "Length(name) <= 200":  len(request.json['name']) <= 200,
+                        "Count(links) <= 3":  len(request.json['links']) <= 3,
+                        "Length(description) <= 1000":  len(request.json['description']) <= 1000
+                        }), 400
 
 
 # Метод обработки ошибки 404
@@ -187,7 +186,7 @@ def get_password(username):
 # Метод обработки ошибки аунтефикации
 @auth.error_handler
 def unauthorized():
-    return make_response(jsonify({'error': 'Unauthorized access'}), 403)
+    return make_response(jsonify({'error': 'Unauthorized access'}), 401)
 
 
 if __name__ == '__main__':
